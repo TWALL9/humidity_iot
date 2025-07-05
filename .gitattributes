@@ -1,0 +1,6 @@
+# Force LF endings
+* text eol=lf
+
+# Windows-specific stuff
+*.bat text eol=crlf
+*.cmd text eol=crlf
