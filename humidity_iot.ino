@@ -183,6 +183,7 @@ void calculateSleepDuration() {
   rtc.setAlarmTime(target.hour, target.minute, target.second);
 }
 
+// TODO fill these out with DHT-11 sensor info things
 static float getCellVoltage() {
   return 0.0;
 }
