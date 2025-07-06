@@ -16,11 +16,15 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include <ArduinoMqttClient.h>
+#include <cstdint>
+#include <utility>
+
 #if defined(ARDUINO_SAMD_MKRWIFI1010) || defined(ARDUINO_SAMD_NANO_33_IOT) || defined(ARDUINO_AVR_UNO_WIFI_REV2)
 #include <WiFiNINA.h>
+#include <SAMD_AnalogCorrection.h>
 #elif defined(ARDUINO_SAMD_MKR1000)
 #include <WiFi101.h>
+#include <SAMD_AnalogCorrection.h>
 #elif defined(ARDUINO_ARCH_ESP8266)
 #include <ESP8266WiFi.h>
 #elif defined(ARDUINO_PORTENTA_H7_M7) || defined(ARDUINO_NICLA_VISION) || defined(ARDUINO_ARCH_ESP32) || defined(ARDUINO_GIGA) || defined(ARDUINO_OPTA)
@@ -31,10 +35,11 @@
 #include <WiFiS3.h>
 #endif
 
+#include <ArduinoMqttClient.h>
+#include <ArduinoLowPower.h>
+#include <DHT.h>
+
 #include "secrets.h"  // SECRET_SSID, SECRET_PASS, BROKER_HOST
-#include <RTCZero.h>
-#include <cstdint>
-#include <utility>
 
 static float getHumidity();
 static float getTemperature();
@@ -47,8 +52,14 @@ const char pass[] = SECRET_PASS;
 const char broker_host[] = BROKER_HOST;
 const int port = 1883;
 
+#define DHTTYPE DHT22
+#define DHTPIN 2
+#define CELL_VOLTAGE_PIN A1
+
 WiFiClient wifi_client;
 MqttClient mqtt_client(wifi_client);
+
+DHT dht(DHTPIN, DHTTYPE);
 
 typedef float (*MeasurementFunc)();
 
@@ -59,30 +70,6 @@ constexpr std::pair<const char*, MeasurementFunc> measurements[] = {
   { "basement/heartbeat", getHeartbeat }
 };
 
-RTCZero rtc;
-
-// TODO use official arduino DateTime types
-// TODO add duration as difference between two datetimes.
-struct DateTime {
-  uint8_t year;
-  uint8_t month;
-  uint8_t day;
-  uint8_t hour;
-  uint8_t minute;
-  uint8_t second;
-};
-
-DateTime current{
-  .year = 25,
-  .month = 7,
-  .day = 1,
-  .hour = 19,
-  .minute = 29,
-  .second = 0,
-};
-
-DateTime target = current;
-
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
@@ -92,21 +79,17 @@ void setup() {
     ;
   }
 
+  dht.begin();
+
   mqtt_client.setId("basement");
 
   reconnectToMqtt();
 
-  // TODO get NTP time, populate DateTime with that info.
-  rtc.begin();
-  rtc.setTime(current.hour, current.minute, current.second);
-  rtc.setDate(current.day, current.month, current.year);
-  target.minute = current.minute + 1;
-  rtc.setAlarmTime(target.hour, target.minute, target.second);
-
-  // TODO check if this is the correct way to get a 1 hour sleep
-  // rtc.enableAlarm(rtc.MATCH_MMSS);
-  rtc.enableAlarm(rtc.MATCH_SS);
-  rtc.attachInterrupt(reconnectToMqtt);
+  // Values for this chip found in CorrectADCResponse.ino, run it for yourself on your chip first!!!
+#if defined(ARDUINO_SAMD_MKRWIFI1010) || defined(ARDUINO_SAMD_NANO_33_IOT) || defined(ARDUINO_SAMD_MKR1000)
+  analogReadResolution(12);
+  analogReadCorrection(28, 0);
+#endif
 }
 
 void loop() {
@@ -115,8 +98,12 @@ void loop() {
   if (mqtt_client.connected()) {
     Serial.print("Sending messages...");
     for (const auto m : measurements) {
+      float reading = m.second();
+      if (isnan(reading)) {
+        reading = -1.0;
+      }
       mqtt_client.beginMessage(m.first);
-      mqtt_client.print(m.second());
+      mqtt_client.print(reading);
       mqtt_client.endMessage();
     }
 
@@ -132,9 +119,8 @@ void loop() {
 
   if (messages_sent) {
     Serial.println("Entering sleep mode");
-    calculateSleepDuration();
     wifi_client.stop();
-    rtc.standbyMode();
+    LowPower.deepSleep(60000);
   }
 }
 
@@ -175,25 +161,17 @@ static void reconnectToMqtt() {
   }
 }
 
-void calculateSleepDuration() {
-  // TODO get NTP time
-  current.minute += 1;
-  target.minute += 1;
-
-  rtc.setAlarmTime(target.hour, target.minute, target.second);
-}
-
 // TODO fill these out with DHT-11 sensor info things
 static float getCellVoltage() {
-  return 0.0;
+  return analogRead(CELL_VOLTAGE_PIN);
 }
 
 static float getHumidity() {
-  return 1.0;
+  return dht.readHumidity();
 }
 
 static float getTemperature() {
-  return 2.0;
+  return dht.readTemperature();
 }
 
 static float getHeartbeat() {

@@ -9,4 +9,7 @@ This sketch was created on the Arduino Nano IOT 33 board, and requires the follo
 
 - ArduinoMqttClient
 - WiFININA
-- RTCZero
+- ArduinoLowPower
+  - which needs to be manually installed from here: https://github.com/arduino-libraries/ArduinoLowPower/tree/master
+- Adafruit DHT sensor library
+
