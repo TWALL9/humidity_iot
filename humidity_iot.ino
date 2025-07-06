@@ -76,9 +76,6 @@ void setup() {
   digitalWrite(LED_BUILTIN, LOW);
 
   Serial.begin(9600);
-  while (!Serial) {
-    ;
-  }
 
   dht.begin();
 
@@ -97,6 +94,7 @@ void loop() {
   bool messages_sent = false;
 
   if (mqtt_client.connected()) {
+    digitalWrite(LED_BUILTIN, HIGH);
     Serial.print("Sending messages...");
     for (const auto m : measurements) {
       float reading = m.second();
@@ -121,7 +119,8 @@ void loop() {
   if (messages_sent) {
     Serial.println("Entering sleep mode");
     wifi_client.stop();
-    LowPower.deepSleep(60000);
+    digitalWrite(LED_BUILTIN, LOW);
+    LowPower.deepSleep(60000 * 60);
   }
 }
 
@@ -178,14 +177,16 @@ static float getCellVoltage() {
  * return humidity in raw percent (0-100)
  */
 static float getHumidity() {
-  return dht.readHumidity();
+  // return dht.readHumidity();
+  return 1.0;
 }
 
 /**
  * return temperature in celsius
  */
 static float getTemperature() {
-  return dht.readTemperature();
+  // return dht.readTemperature();
+  return 20.0;
 }
 
 /**
