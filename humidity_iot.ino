@@ -37,10 +37,13 @@
 
 #include <ArduinoMqttClient.h>
 #include <ArduinoLowPower.h>
+#include <Adafruit_SleepyDog.h>
 #include <DHT.h>
+#include <RTCZero.h>
 
 #include "secrets.h"  // SECRET_SSID, SECRET_PASS, BROKER_HOST
 
+static uint32_t numSleepsForPeriod(uint32_t* hardware_sleep_ms, uint32_t period_ms);
 static float getHumidity();
 static float getTemperature();
 static float getCellVoltage();
@@ -52,16 +55,6 @@ const char pass[] = SECRET_PASS;
 const char broker_host[] = BROKER_HOST;
 const int port = 1883;
 
-#define DHTTYPE DHT22
-#define DHTPIN 2
-#define CELL_VOLTAGE_PIN A0
-#define READ_RES 12
-
-WiFiClient wifi_client;
-MqttClient mqtt_client(wifi_client);
-
-DHT dht(DHTPIN, DHTTYPE);
-
 typedef float (*MeasurementFunc)();
 
 constexpr std::pair<const char*, MeasurementFunc> measurements[] = {
@@ -70,6 +63,16 @@ constexpr std::pair<const char*, MeasurementFunc> measurements[] = {
   { "basement/cell_voltage", getCellVoltage },
   { "basement/heartbeat", getHeartbeat }
 };
+
+#define DHTTYPE DHT22
+#define DHTPIN 2
+#define CELL_VOLTAGE_PIN A0
+#define READ_RES 12
+
+WiFiClient wifi_client;
+MqttClient mqtt_client(wifi_client);
+DHT dht(DHTPIN, DHTTYPE);
+uint32_t num_sleeps = 1;
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
@@ -82,6 +85,12 @@ void setup() {
   mqtt_client.setId("basement");
 
   reconnectToMqtt();
+
+  uint32_t max_sleep_time = Watchdog.enable();
+  Serial.print("max sleep: ");
+  Serial.println(max_sleep_time);
+
+  num_sleeps = numSleepsForPeriod(&max_sleep_time, 60 * 60 * 1000);
 
   // Values for this chip found in CorrectADCResponse.ino, run it for yourself on your chip first!!!
 #if defined(ARDUINO_SAMD_MKRWIFI1010) || defined(ARDUINO_SAMD_NANO_33_IOT) || defined(ARDUINO_SAMD_MKR1000)
@@ -120,8 +129,35 @@ void loop() {
     Serial.println("Entering sleep mode");
     wifi_client.stop();
     digitalWrite(LED_BUILTIN, LOW);
-    LowPower.deepSleep(60000 * 60);
+    // LowPower.deepSleep(60000 * 60);
+    for (uint32_t i = 0; i < num_sleeps; i++) {
+      Watchdog.sleep();
+    }
   }
+}
+
+/**
+ * calculate the number of times the hardware can be put into deep sleep via RTC watchdog to stay sleep for a set period of time
+*/
+static uint32_t numSleepsForPeriod(uint32_t* hardware_sleep_ms, uint32_t period_ms) {
+  if (hardware_sleep_ms == NULL) {
+    return 0;
+  }
+
+  uint32_t ms_rounded = *hardware_sleep_ms;
+  uint32_t remainder = period_ms % ms_rounded;
+
+  // Find the largest value hardware_sleep_ms can be to fit within the period evenly
+  while (remainder != 0 && ms_rounded >= 0) {
+    ms_rounded -= 1;
+    remainder = period_ms % ms_rounded;
+  }
+
+  uint32_t sleeps_per_hour = period_ms / ms_rounded;
+
+  *hardware_sleep_ms = ms_rounded;
+
+  return sleeps_per_hour;
 }
 
 static void reconnectToMqtt() {
