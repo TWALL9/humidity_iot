@@ -54,7 +54,8 @@ const int port = 1883;
 
 #define DHTTYPE DHT22
 #define DHTPIN 2
-#define CELL_VOLTAGE_PIN A1
+#define CELL_VOLTAGE_PIN A0
+#define READ_RES 12
 
 WiFiClient wifi_client;
 MqttClient mqtt_client(wifi_client);
@@ -87,7 +88,7 @@ void setup() {
 
   // Values for this chip found in CorrectADCResponse.ino, run it for yourself on your chip first!!!
 #if defined(ARDUINO_SAMD_MKRWIFI1010) || defined(ARDUINO_SAMD_NANO_33_IOT) || defined(ARDUINO_SAMD_MKR1000)
-  analogReadResolution(12);
+  analogReadResolution(READ_RES);
   analogReadCorrection(28, 0);
 #endif
 }
@@ -161,19 +162,35 @@ static void reconnectToMqtt() {
   }
 }
 
-// TODO fill these out with DHT-11 sensor info things
+/**
+ * returns voltage of one of the battery cells. This is intended to be a rough estimate of how charged the battery is, but charge estimation is handled by the RPI
+ */
 static float getCellVoltage() {
-  return analogRead(CELL_VOLTAGE_PIN);
+  const float steps = (1 << READ_RES) - 1;  // NOTE: this is because analog read resolution is set to 12 in setup().
+  const float v_ref = 3.3;                  // NOTE: change this if you're on a 5V board
+  int raw_val = analogRead(CELL_VOLTAGE_PIN);
+  float cell_voltage = (raw_val / steps) * v_ref;
+
+  return cell_voltage;
 }
 
+/**
+ * return humidity in raw percent (0-100)
+ */
 static float getHumidity() {
   return dht.readHumidity();
 }
 
+/**
+ * return temperature in celsius
+ */
 static float getTemperature() {
   return dht.readTemperature();
 }
 
+/**
+ * return an incrementing heartbeat value to tell broker that device is alive
+ */
 static float getHeartbeat() {
   static uint32_t heartbeat = 0;
   heartbeat++;
